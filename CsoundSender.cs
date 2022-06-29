@@ -3,12 +3,13 @@ using System.Collections.Generic;
 using UnityEngine;
 
 //TODO
-    //Angular speed: makes it so it can calculate the angular speed from the transform
     //Rotation: makes it so it passes Csound data based on the object's transform rotation vector
+        //Endless encoder mode
+        //Circular mode: 0-180 (min-max) 180-360 (max-min)
 
-    //Scale: makes it so it passes data based on the object's transform scale vector
-        //Fix scale magnitude
-        //Create a relative magnitude toggle
+//BACKLOG
+        //Angular speed: makes it so it can calculate the angular speed from the transform
+        //Add Velocity: pass data based on each individual velocity vector axis
 
 /// <summary>
 /// Provides general methods to pass data from Unity to Csound.
@@ -31,6 +32,12 @@ public class CsoundSender : MonoBehaviour
         [Tooltip("Defined which preset to be set on start")]
         [SerializeField] private int presetIndexOnStart;
         private int currentPresetIndex;
+
+    [Header("SCORE EVENTS")]
+        [SerializeField] private CsoundScoreEventSO[] scoreEvents;
+        [SerializeField] private bool sendScoreEventOnStart;
+        [SerializeField] public int scoreEventIndexOnStart;
+        private int currentScoreEvent;
 
     [Header("INSTRUMENT TRIGGER")]
         [Tooltip("Defines the channel name that is used to start and stop the Csound instrument")]
@@ -66,7 +73,7 @@ public class CsoundSender : MonoBehaviour
         [SerializeField] private PositionVectorReference setYPositionTo = PositionVectorReference.None;
         [SerializeField] private PositionVectorReference setZPositionTo = PositionVectorReference.None;
         [SerializeField] private Vector3 posVectorRangesMax, posVectorRangesMin;
-        [SerializeField] private bool returnAbsoluteValuesX, returnAbsoluteValuesY, returnAbsoluteValuesZ;
+        [SerializeField] private bool returnAbsoluteValuesPosX, returnAbsoluteValuesPosY, returnAbsoluteValuesPosZ;
         [Space]
         [SerializeField] private CsoundChannelDataSO csoundChannelsPosX;
         [SerializeField] private CsoundChannelDataSO csoundChannelsPosY;
@@ -87,15 +94,36 @@ public class CsoundSender : MonoBehaviour
         private float rotationSpeed;
         private bool updateAngularSpeed = false;
 
+    public enum RotationVectorReference { Absolute, Relative, None };
+    public enum RotationMode { Circular, EndlessEncoder };
+    [Header("ROTATION")]
+        [SerializeField] private RotationMode rotationMode = RotationMode.EndlessEncoder;
+        [SerializeField] private RotationVectorReference setXRotationTo = RotationVectorReference.Relative;
+        [SerializeField] private RotationVectorReference setYRotationTo = RotationVectorReference.Relative;
+        [SerializeField] private RotationVectorReference setZRotationTo = RotationVectorReference.Relative;
+        [SerializeField] private Vector3 rotationVectorRangesMax, rotationVectorRangesMin;
+        [SerializeField] private bool returnAbsoluteValuesRotationX, returnAbsoluteValuesRotationY, returnAbsoluteValuesRotationZ;
+        [Space]
+        [SerializeField] private CsoundChannelDataSO csoundChannelsRotationX;
+        [SerializeField] private CsoundChannelDataSO csoundChannelsRotationY;
+        [SerializeField] private CsoundChannelDataSO ccsoundChannelsRotationZ;
+        [SerializeField] private bool updateRotationOnStart = false;
+
+        private bool updateRotation;
+        private Vector3 rotationStart, rotationRelative;
+        private Quaternion rotationStartQuaternion, rotationRelativeQuaternion;
+
+
+    public enum ScaleVectorReference { Absolute, Relative, None };
     [Header("SCALE MAGNITUDE")]
-        [SerializeField] private CsoundChannelDataSO scaleChannels;
-        public float maximumScale;
+        [SerializeField] private ScaleVectorReference setScaleMagnitudeTo = ScaleVectorReference.Relative;
+        [SerializeField] private CsoundChannelDataSO scaleMagnitudeChannels;
+        public float scaleMagnitudeMax;
         [SerializeField] private bool magnitudeLocalScale = true;
         [SerializeField] private bool updateScaleMagnitudeOnStart;
         private bool updateScaleMagnitude;
-        private float scaleMagnitude;
+        private float scaleMagnitudeCurrent, scaleMagnitudeStart, scaleMagnitudeFinal;
 
-    public enum ScaleVectorReference { Absolute, Relative, None };
     [Header("SCALE AXIS")]
         [SerializeField] private ScaleVectorReference setXScaleTo = ScaleVectorReference.None;
         [SerializeField] private ScaleVectorReference setYScaleTo = ScaleVectorReference.None;
@@ -123,7 +151,8 @@ public class CsoundSender : MonoBehaviour
         [Tooltip("Prints the object's relative position vector on Update.")]
         [SerializeField] private bool debugPosition = false;
         [Tooltip("Prints the object's angular speed on Update.")]
-        [SerializeField] private bool debugAngularSpeed= false;
+        [SerializeField] private bool debugAngularSpeed = false;
+        [SerializeField] private bool debugRotation = false;
         [SerializeField] private bool debugScale = false;
 
 
@@ -157,13 +186,16 @@ public class CsoundSender : MonoBehaviour
 
     void Start()
     {
-        //Set defined trigger channel to 1 if triggerOnStart is true.
-        if (triggerOnStart)
-            SetTrigger(1);
-
         //Calls SetPreset if setPresetOnStart is true.
         if (setPresetOnStart)
             SetPreset(presetIndexOnStart);
+
+        if (sendScoreEventOnStart)
+            SendScoreEvent(scoreEventIndexOnStart);
+
+        //Set defined trigger channel to 1 if triggerOnStart is true.
+        if (triggerOnStart)
+            SetTrigger(1);
 
         //Calls SetChannelsToRandomValue if setChannelRandomValuesOnStart is true.
         if (setChannelRandomValuesOnStart)
@@ -179,11 +211,14 @@ public class CsoundSender : MonoBehaviour
         if (updateAngularSpeedOnStart)
             UpdateAngularSpeed(true);
 
-        if (updateScaleMagnitude)
+        if (updateScaleMagnitudeOnStart)
             UpdateScaleMagnitude(true);
 
         if (updateScaleOnStart)
             UpdateScaleAxis(true);
+
+        if(updateRotationOnStart)
+            UpdateRotation(true);
     }
 
     void FixedUpdate()
@@ -218,6 +253,12 @@ public class CsoundSender : MonoBehaviour
 
         }
 
+        if (updateRotation)
+        {
+            if (setXRotationTo == RotationVectorReference.Relative || setYRotationTo == RotationVectorReference.Relative || setZRotationTo == RotationVectorReference.Relative)
+                CalculateRelativeRotation();
+        }
+
         if (updateScaleAxis)
         {
             if (calculateRelativeScale)
@@ -231,9 +272,47 @@ public class CsoundSender : MonoBehaviour
                 SetCsoundValuesScaleZ();
         }
 
-        if (updateScaleMagnitude)
+        if (updateScaleMagnitude && setScaleMagnitudeTo !=  ScaleVectorReference.None)
             SendCsoundDataBasedOnScaleMagnitude();
     }
+    #endregion
+
+    #region PRESETS
+    /// <summary>
+    /// Set channel fixed values to Csound by using an index from the preset list.
+    /// </summary>
+    /// <param name="index"></param>
+    public void SetPreset(int index)
+    {
+        if (debugPresets)
+            Debug.Log("CSOUND " + gameObject.name + " set preset: " + presetList[index]);
+
+        foreach (CsoundChannelDataSO.CsoundChannelData channelData in presetList[index].channelData)
+        {
+            //Passes values to Csound.
+            csoundUnity.SetChannel(channelData.name, channelData.fixedValue);
+
+            if (debugPresets)
+                Debug.Log("CSOUND " + gameObject.name + " set preset: " + channelData.name + " , " + channelData.fixedValue);
+        }
+
+        //Set current preset index to the passed in index.
+        currentPresetIndex = index;
+
+    }
+
+    /// <summary>
+    /// Adds a channel data element to the preset list and sets its fixed values to the Csound instrument
+    /// </summary>
+    /// <param name="channelData"></param>
+    public void SetPreset(CsoundChannelDataSO channelData)
+    {
+        //Adds new channel data to the preset list as the last item.
+        presetList.Add(channelData);
+        //Calls SetPreset passing in the last item as the index.
+        SetPreset(presetList.Count - 1);
+    }
+
     #endregion
 
     #region TRIGGER
@@ -256,7 +335,7 @@ public class CsoundSender : MonoBehaviour
     /// </summary>
     /// <param name="channelName"></param>
     /// <param name="value"></param>
-    public void ToggleTrigger(string channelName, int value)
+    public void SetTrigger(string channelName, int value)
     {
         //Toggle the passed in value between 1 and 0.
         int toggledValue = 1 - value;
@@ -282,40 +361,30 @@ public class CsoundSender : MonoBehaviour
     }
     #endregion
 
-    #region PRESETS
-    /// <summary>
-    /// Set channel fixed values to Csound by using an index from the preset list.
-    /// </summary>
-    /// <param name="index"></param>
-    public void SetPreset(int index)
+    #region SCORE EVENTS
+
+    public void SendScoreEvent(int index)
     {
-        if (debugPresets)
-            Debug.Log("CSOUND " + gameObject.name + " set preset: " + presetList[index]);
-
-        foreach(CsoundChannelDataSO.CsoundChannelData channelData in presetList[index].channelData)
-        {
-            //Passes values to Csound.
-            csoundUnity.SetChannel(channelData.name, channelData.fixedValue);
-
-            if (debugPresets)
-                Debug.Log("CSOUND " + gameObject.name + " set preset: " + channelData.name + " , " + channelData.fixedValue);
-        }
-
-        //Set current preset index to the passed in index.
-        currentPresetIndex = index;
-
+        currentScoreEvent = index;
+        csoundUnity.SendScoreEvent(scoreEvents[currentScoreEvent].ConcatenateScoreEventString());
     }
 
-    /// <summary>
-    /// Adds a channel data element to the preset list and sets its fixed values to the Csound instrument
-    /// </summary>
-    /// <param name="channelData"></param>
-    public void SetPreset(CsoundChannelDataSO channelData)
+    public void SendScoreEvent(string scoreEvent)
     {
-        //Adds new channel data to the preset list as the last item.
-        presetList.Add(channelData);
-        //Calls SetPreset passing in the last item as the index.
-        SetPreset(presetList.Count - 1);
+        csoundUnity.SendScoreEvent(scoreEvent);
+    }
+
+    public void SendScoreEvent(string scorechar, string instrument, float delay, float duration)
+    {
+
+        csoundUnity.SendScoreEvent(scorechar + " " + instrument + " " + delay + " " + duration);
+    }
+
+    public void SendScoreEvent(string scorechar, string instrument, float delay, float duration, float[] extraPFields)
+    {
+        string concatenatedPFields = string.Join(" ", extraPFields);
+
+        csoundUnity.SendScoreEvent(scorechar + " " + instrument + " " + delay + " " + duration + " " + concatenatedPFields);
     }
 
     #endregion
@@ -541,31 +610,31 @@ public class CsoundSender : MonoBehaviour
     private void SetCsoundValuesPosX()
     {
         if (setXPositionTo == PositionVectorReference.Absolute)
-            SetCsoundChannelBasedOnAxis(csoundChannelsPosX, posVectorRangesMin.x, posVectorRangesMax.x, transform.position.x, returnAbsoluteValuesX);
+            SetCsoundChannelBasedOnAxis(csoundChannelsPosX, posVectorRangesMin.x, posVectorRangesMax.x, transform.position.x, returnAbsoluteValuesPosX);
         else if (setXPositionTo == PositionVectorReference.RelativeToCamera)
-            SetCsoundChannelBasedOnAxis(csoundChannelsPosX, posVectorRangesMin.x, posVectorRangesMax.x, relativeCameraPos.x, returnAbsoluteValuesX);
+            SetCsoundChannelBasedOnAxis(csoundChannelsPosX, posVectorRangesMin.x, posVectorRangesMax.x, relativeCameraPos.x, returnAbsoluteValuesPosX);
         else
-            SetCsoundChannelBasedOnAxis(csoundChannelsPosX, posVectorRangesMin.x, posVectorRangesMax.x, relativePos.x, returnAbsoluteValuesX);
+            SetCsoundChannelBasedOnAxis(csoundChannelsPosX, posVectorRangesMin.x, posVectorRangesMax.x, relativePos.x, returnAbsoluteValuesPosX);
     }
 
     private void SetCsoundValuesPosY()
     {
         if (setYPositionTo == PositionVectorReference.Absolute)
-            SetCsoundChannelBasedOnAxis(csoundChannelsPosY, posVectorRangesMin.y, posVectorRangesMax.y, transform.position.y, returnAbsoluteValuesY);
+            SetCsoundChannelBasedOnAxis(csoundChannelsPosY, posVectorRangesMin.y, posVectorRangesMax.y, transform.position.y, returnAbsoluteValuesPosY);
         else if (setXPositionTo == PositionVectorReference.RelativeToCamera)
-            SetCsoundChannelBasedOnAxis(csoundChannelsPosY, posVectorRangesMin.y, posVectorRangesMax.y, relativeCameraPos.y, returnAbsoluteValuesY);
+            SetCsoundChannelBasedOnAxis(csoundChannelsPosY, posVectorRangesMin.y, posVectorRangesMax.y, relativeCameraPos.y, returnAbsoluteValuesPosY);
         else
-            SetCsoundChannelBasedOnAxis(csoundChannelsPosY, posVectorRangesMin.y, posVectorRangesMax.y, relativePos.y, returnAbsoluteValuesY);
+            SetCsoundChannelBasedOnAxis(csoundChannelsPosY, posVectorRangesMin.y, posVectorRangesMax.y, relativePos.y, returnAbsoluteValuesPosY);
     }
 
     private void SetCsoundValuesPosZ()
     {
         if (setZPositionTo == PositionVectorReference.Absolute)
-            SetCsoundChannelBasedOnAxis(csoundChannelsPosZ, posVectorRangesMin.z, posVectorRangesMax.z, transform.position.z, returnAbsoluteValuesZ);
+            SetCsoundChannelBasedOnAxis(csoundChannelsPosZ, posVectorRangesMin.z, posVectorRangesMax.z, transform.position.z, returnAbsoluteValuesPosZ);
         else if (setZPositionTo == PositionVectorReference.RelativeToCamera)
-            SetCsoundChannelBasedOnAxis(csoundChannelsPosZ, posVectorRangesMin.z, posVectorRangesMax.z, relativeCameraPos.z, returnAbsoluteValuesZ);
+            SetCsoundChannelBasedOnAxis(csoundChannelsPosZ, posVectorRangesMin.z, posVectorRangesMax.z, relativeCameraPos.z, returnAbsoluteValuesPosZ);
         else
-            SetCsoundChannelBasedOnAxis(csoundChannelsPosZ, posVectorRangesMin.z, posVectorRangesMax.z, relativePos.z, returnAbsoluteValuesZ);
+            SetCsoundChannelBasedOnAxis(csoundChannelsPosZ, posVectorRangesMin.z, posVectorRangesMax.z, relativePos.z, returnAbsoluteValuesPosZ);
     }
     #endregion
 
@@ -608,6 +677,42 @@ public class CsoundSender : MonoBehaviour
     #endregion
 
     #region ROTATION
+    public void UpdateRotation(bool update)
+    {
+        updateRotation = update;
+
+        GetInitialRotation();
+
+        if (debugRotation)
+            Debug.Log("CSOUND " + gameObject.name + " update rotation  = " + updateRotation);
+    }
+
+    public void UpdateRotationToggle()
+    {
+        if (updateRotation)
+            updateRotation = false;
+        else
+            updateRotation = true;
+
+        UpdateRotation(updateRotation);
+    }
+
+    private void GetInitialRotation()
+    {
+        rotationStartQuaternion = Quaternion.Euler(gObject.transform.rotation.eulerAngles);
+    }
+
+    private void CalculateRelativeRotation()
+    {
+        //rotationRelativeQuaternion.x = gObject.transform.rotation.eulerAngles.x - rotationStartQuaternion.x;
+        //rotationRelativeQuaternion.y = gObject.transform.rotation.eulerAngles.y - rotationStartQuaternion.y;
+        //rotationRelativeQuaternion.z = gObject.transform.rotation.eulerAngles.z - rotationStartQuaternion.z;
+
+        rotationRelativeQuaternion = Quaternion.Euler(gObject.transform.rotation.eulerAngles);
+
+        if (debugRotation)
+            Debug.Log("CSOUND " + gameObject.name + " relative rotation  = " + rotationRelative);
+    }
 
     #endregion
 
@@ -616,6 +721,15 @@ public class CsoundSender : MonoBehaviour
     public void UpdateScaleMagnitude(bool update)
     {
         updateScaleMagnitude = update;
+
+        if (updateScaleMagnitude)
+        {
+            if (magnitudeLocalScale)
+                scaleMagnitudeStart = gObject.transform.localScale.magnitude;
+            else
+                scaleMagnitudeStart = gObject.transform.lossyScale.magnitude;
+        }
+
 
         if(debugScale)
             Debug.Log("CSOUND " + gameObject.name + " update scale magnitude = " + updateScaleMagnitude);
@@ -634,21 +748,30 @@ public class CsoundSender : MonoBehaviour
     private void SendCsoundDataBasedOnScaleMagnitude()
     {
         if (magnitudeLocalScale)
-            scaleMagnitude = gObject.transform.localScale.magnitude;
+            scaleMagnitudeCurrent = gObject.transform.localScale.magnitude;
         else
-            scaleMagnitude = gObject.transform.lossyScale.magnitude;
+            scaleMagnitudeCurrent = gObject.transform.lossyScale.magnitude;
 
-        foreach (CsoundChannelDataSO.CsoundChannelData channelData in scaleChannels.channelData)
+        if(setScaleMagnitudeTo == ScaleVectorReference.Relative)
+        {
+            scaleMagnitudeFinal = scaleMagnitudeCurrent - scaleMagnitudeStart;
+        }
+        else if(setScaleMagnitudeTo == ScaleVectorReference.Absolute)
+        {
+            scaleMagnitudeFinal = scaleMagnitudeCurrent;
+        }
+
+        foreach (CsoundChannelDataSO.CsoundChannelData channelData in scaleMagnitudeChannels.channelData)
         {
             //Scales the value passed to Csound based on the minValue and maxValue defined for each channel.
-            float scaledSpeedValue =
-                Mathf.Clamp(ScaleFloat(0, maxSpeedValue, channelData.minValue, channelData.maxValue, speed), channelData.minValue, channelData.maxValue);
+            float scaledValue =
+                Mathf.Clamp(ScaleFloat(0, scaleMagnitudeMax, channelData.minValue, channelData.maxValue, scaleMagnitudeFinal), channelData.minValue, channelData.maxValue);
             //Passes values to Csound.
-            csoundUnity.SetChannel(channelData.name, scaledSpeedValue);
+            csoundUnity.SetChannel(channelData.name, scaledValue);
         }
 
         if(debugScale)
-            Debug.Log("CSOUND " + gameObject.name + " scale magnitude = " + scaleMagnitude);
+            Debug.Log("CSOUND " + gameObject.name + " scale magnitude = " + scaleMagnitudeFinal);
     }
 
     #endregion
