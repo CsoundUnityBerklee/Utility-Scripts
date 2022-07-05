@@ -17,5 +17,4 @@ public class CsoundScoreEventSO : ScriptableObject
         Debug.Log(scoreEvent);
         return scoreEvent;
     }
-
 }

@@ -3,13 +3,15 @@ using System.Collections.Generic;
 using UnityEngine;
 
 //TODO
-    //Rotation: makes it so it passes Csound data based on the object's transform rotation vector
-        //Endless encoder mode
-        //Circular mode: 0-180 (min-max) 180-360 (max-min)
+    //Write summeries for all functions
+    //Write tooltips for all variables
+    //Thorough commenting of every line of code
+    //Inspector scripting: make a drop down for each header of variables
 
 //BACKLOG
-        //Angular speed: makes it so it can calculate the angular speed from the transform
-        //Add Velocity: pass data based on each individual velocity vector axis
+    //Angular speed: makes it so it can calculate the angular speed from the transform
+    //Add Velocity: pass data based on each individual velocity vector axis
+    //Rotation: make it so it axis can act as  an endless encoder
 
 /// <summary>
 /// Provides general methods to pass data from Unity to Csound.
@@ -95,23 +97,23 @@ public class CsoundSender : MonoBehaviour
         private bool updateAngularSpeed = false;
 
     public enum RotationVectorReference { Absolute, Relative, None };
-    public enum RotationMode { Circular, EndlessEncoder };
+    public enum RotationMode { Circular };
     [Header("ROTATION")]
-        [SerializeField] private RotationMode rotationMode = RotationMode.EndlessEncoder;
+        [SerializeField] private RotationMode rotationMode = RotationMode.Circular;
         [SerializeField] private RotationVectorReference setXRotationTo = RotationVectorReference.Relative;
         [SerializeField] private RotationVectorReference setYRotationTo = RotationVectorReference.Relative;
         [SerializeField] private RotationVectorReference setZRotationTo = RotationVectorReference.Relative;
-        [SerializeField] private Vector3 rotationVectorRangesMax, rotationVectorRangesMin;
-        [SerializeField] private bool returnAbsoluteValuesRotationX, returnAbsoluteValuesRotationY, returnAbsoluteValuesRotationZ;
+        //[SerializeField] private Vector3 rotationVectorRangesMax, rotationVectorRangesMin;
+        //[SerializeField] private bool returnAbsoluteValuesRotationX, returnAbsoluteValuesRotationY, returnAbsoluteValuesRotationZ;
         [Space]
         [SerializeField] private CsoundChannelDataSO csoundChannelsRotationX;
         [SerializeField] private CsoundChannelDataSO csoundChannelsRotationY;
-        [SerializeField] private CsoundChannelDataSO ccsoundChannelsRotationZ;
+        [SerializeField] private CsoundChannelDataSO csoundChannelsRotationZ;
+        [SerializeField] private bool useLocalEulerAngles;
         [SerializeField] private bool updateRotationOnStart = false;
 
         private bool updateRotation;
-        private Vector3 rotationStart, rotationRelative;
-        private Quaternion rotationStartQuaternion, rotationRelativeQuaternion;
+        private Vector3 rotationStart, rotationRelative, localRotation;
 
 
     public enum ScaleVectorReference { Absolute, Relative, None };
@@ -119,7 +121,7 @@ public class CsoundSender : MonoBehaviour
         [SerializeField] private ScaleVectorReference setScaleMagnitudeTo = ScaleVectorReference.Relative;
         [SerializeField] private CsoundChannelDataSO scaleMagnitudeChannels;
         public float scaleMagnitudeMax;
-        [SerializeField] private bool magnitudeLocalScale = true;
+        [SerializeField] private bool useLocalScaleMagnitude = true;
         [SerializeField] private bool updateScaleMagnitudeOnStart;
         private bool updateScaleMagnitude;
         private float scaleMagnitudeCurrent, scaleMagnitudeStart, scaleMagnitudeFinal;
@@ -133,7 +135,7 @@ public class CsoundSender : MonoBehaviour
         [SerializeField] private CsoundChannelDataSO csoundChannelsScaleX;
         [SerializeField] private CsoundChannelDataSO csoundChannelsScaleY;
         [SerializeField] private CsoundChannelDataSO csoundChannelsScaleZ;
-        [SerializeField] private bool localScale = true;
+        [SerializeField] private bool useLocalScale = true;
         [SerializeField] private bool updateScaleOnStart;
         private Vector3 startScale, relativeScale;
         private bool calculateRelativeScale;
@@ -255,8 +257,16 @@ public class CsoundSender : MonoBehaviour
 
         if (updateRotation)
         {
-            if (setXRotationTo == RotationVectorReference.Relative || setYRotationTo == RotationVectorReference.Relative || setZRotationTo == RotationVectorReference.Relative)
-                CalculateRelativeRotation();
+            CalculateRelativeRotation();
+
+            if (csoundChannelsRotationX != null || setXRotationTo != RotationVectorReference.None)
+                SetCsoundValuesXRotation();
+
+            if (csoundChannelsRotationY != null || setYRotationTo != RotationVectorReference.None)
+                SetCsoundValuesYRotation();
+
+            if (csoundChannelsRotationZ != null || setZRotationTo != RotationVectorReference.None)
+                SetCsoundValuesZRotation();
         }
 
         if (updateScaleAxis)
@@ -699,19 +709,72 @@ public class CsoundSender : MonoBehaviour
 
     private void GetInitialRotation()
     {
-        rotationStartQuaternion = Quaternion.Euler(gObject.transform.rotation.eulerAngles);
+        if (!useLocalEulerAngles)
+            rotationStart = transform.eulerAngles;
+        else
+            rotationStart = transform.localEulerAngles;
     }
 
     private void CalculateRelativeRotation()
     {
-        //rotationRelativeQuaternion.x = gObject.transform.rotation.eulerAngles.x - rotationStartQuaternion.x;
-        //rotationRelativeQuaternion.y = gObject.transform.rotation.eulerAngles.y - rotationStartQuaternion.y;
-        //rotationRelativeQuaternion.z = gObject.transform.rotation.eulerAngles.z - rotationStartQuaternion.z;
+        if (!useLocalEulerAngles)
+            localRotation = transform.eulerAngles;
+        else
+            localRotation = transform.localEulerAngles;
 
-        rotationRelativeQuaternion = Quaternion.Euler(gObject.transform.rotation.eulerAngles);
+        rotationRelative = localRotation - rotationStart;
 
         if (debugRotation)
             Debug.Log("CSOUND " + gameObject.name + " relative rotation  = " + rotationRelative);
+    }
+
+    private float CircularAxisValue(float rotationAxis, float wrapAroundValue)
+    {
+        float value;
+
+        if(rotationAxis >= wrapAroundValue)
+            value = ((wrapAroundValue * 2) - rotationAxis) * 2;
+        else
+            value = rotationAxis * 2;
+
+        if(debugRotation)
+            Debug.Log("CSOUND " + gameObject.name + " circular rotation value  = " + value);
+
+        return value;
+    }
+
+
+    private void SetCsoundValuesXRotation()
+    {
+        if(rotationMode == RotationMode.Circular)
+        {
+            if(setXRotationTo == RotationVectorReference.Absolute)
+                SetCsoundChannelBasedOnAxis(csoundChannelsRotationX, 0, 180, CircularAxisValue(localRotation.x, 90));
+            else if (setXRotationTo == RotationVectorReference.Relative)
+                SetCsoundChannelBasedOnAxis(csoundChannelsRotationX, 0, 180, CircularAxisValue(rotationRelative.x, 90));
+        }
+    }
+
+    private void SetCsoundValuesYRotation()
+    {
+        if (rotationMode == RotationMode.Circular)
+        {
+            if (setYRotationTo == RotationVectorReference.Absolute)
+                SetCsoundChannelBasedOnAxis(csoundChannelsRotationY, 0, 360, CircularAxisValue(localRotation.y, 180));
+            else if (setYRotationTo == RotationVectorReference.Relative)
+                SetCsoundChannelBasedOnAxis(csoundChannelsRotationY, 0, 360, CircularAxisValue(rotationRelative.y, 180));
+        }
+    }
+
+    private void SetCsoundValuesZRotation()
+    {
+        if (rotationMode == RotationMode.Circular)
+        {
+            if (setZRotationTo == RotationVectorReference.Absolute)
+                SetCsoundChannelBasedOnAxis(csoundChannelsRotationZ, 0, 360, CircularAxisValue(localRotation.z, 180));
+            else if (setZRotationTo == RotationVectorReference.Relative)
+                SetCsoundChannelBasedOnAxis(csoundChannelsRotationZ, 0, 360, CircularAxisValue(rotationRelative.z, 180));
+        }
     }
 
     #endregion
@@ -724,7 +787,7 @@ public class CsoundSender : MonoBehaviour
 
         if (updateScaleMagnitude)
         {
-            if (magnitudeLocalScale)
+            if (useLocalScaleMagnitude)
                 scaleMagnitudeStart = gObject.transform.localScale.magnitude;
             else
                 scaleMagnitudeStart = gObject.transform.lossyScale.magnitude;
@@ -747,7 +810,7 @@ public class CsoundSender : MonoBehaviour
 
     private void SendCsoundDataBasedOnScaleMagnitude()
     {
-        if (magnitudeLocalScale)
+        if (useLocalScaleMagnitude)
             scaleMagnitudeCurrent = gObject.transform.localScale.magnitude;
         else
             scaleMagnitudeCurrent = gObject.transform.lossyScale.magnitude;
@@ -803,7 +866,7 @@ public class CsoundSender : MonoBehaviour
 
     private void GetRelativeStartingScale()
     {
-        if (localScale)
+        if (useLocalScale)
             startScale = gObject.transform.localScale;
         else
             startScale = gObject.transform.lossyScale;
@@ -811,7 +874,7 @@ public class CsoundSender : MonoBehaviour
 
     private void CalculateRelativeScale()
     {
-        if (localScale)
+        if (useLocalScale)
         {
             relativeScale.x = gObject.transform.localScale.x - startScale.x;
             relativeScale.y = gObject.transform.localScale.y - startScale.y;
@@ -832,7 +895,7 @@ public class CsoundSender : MonoBehaviour
     {
         if(setXScaleTo == ScaleVectorReference.Absolute)
         {
-            if (localScale)
+            if (useLocalScale)
                 SetCsoundChannelBasedOnAxis(csoundChannelsScaleX, scaleVectorRangesMin.x, scaleVectorRangesMax.x, gObject.transform.localScale.x);
             else
                 SetCsoundChannelBasedOnAxis(csoundChannelsScaleX, scaleVectorRangesMin.x, scaleVectorRangesMax.x, gObject.transform.lossyScale.x);
@@ -845,7 +908,7 @@ public class CsoundSender : MonoBehaviour
     {
         if (setYScaleTo == ScaleVectorReference.Absolute)
         {
-            if (localScale)
+            if (useLocalScale)
                 SetCsoundChannelBasedOnAxis(csoundChannelsScaleY, scaleVectorRangesMin.y, scaleVectorRangesMax.y, gObject.transform.localScale.y);
             else
                 SetCsoundChannelBasedOnAxis(csoundChannelsScaleY, scaleVectorRangesMin.y, scaleVectorRangesMax.y, gObject.transform.lossyScale.y);
@@ -858,7 +921,7 @@ public class CsoundSender : MonoBehaviour
     {
         if (setZScaleTo == ScaleVectorReference.Absolute)
         {
-            if (localScale)
+            if (useLocalScale)
                 SetCsoundChannelBasedOnAxis(csoundChannelsScaleZ, scaleVectorRangesMin.z, scaleVectorRangesMax.z, gObject.transform.localScale.z);
             else
                 SetCsoundChannelBasedOnAxis(csoundChannelsScaleZ, scaleVectorRangesMin.z, scaleVectorRangesMax.z, gObject.transform.lossyScale.z);
