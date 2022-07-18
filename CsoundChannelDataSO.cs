@@ -1,5 +1,3 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 [CreateAssetMenu(fileName = "CsoundChannelData", menuName = "Csound/ChannelData")]
@@ -19,9 +17,6 @@ public class CsoundChannelDataSO : ScriptableObject
         //If minValue and maxValue are set to 0, return fixed value...
         if((channelData[index].minValue == 0) && (channelData[index].maxValue == 0))
         {
-            if (debug)
-                Debug.Log("CSOUND set random value: " + channelData[index].name + " set FIXED value: " + channelData[index].fixedValue);
-
             return channelData[index].fixedValue;
         }
         //...else generate a random number between minValue and maxValue.
@@ -30,11 +25,10 @@ public class CsoundChannelDataSO : ScriptableObject
             float value = Random.Range(channelData[index].minValue, channelData[index].maxValue);
 
             if (debug)
-                Debug.Log("CSOUND set random value: " + channelData[index].name + " , " + value);
+                Debug.Log("CSOUND set random value: " + channelData[index].name + " set RANDOM value " + value);
 
             return value;
         }
-
     }
 }
 

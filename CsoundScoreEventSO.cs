@@ -1,5 +1,3 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 [CreateAssetMenu(fileName = "CsoundScoreEvent", menuName = "Csound/ScoreEvent")]
@@ -13,8 +11,6 @@ public class CsoundScoreEventSO : ScriptableObject
     {
         string concatenatedPFields = string.Join(" ", pFields);
         string scoreEvent = scoreCharacter + " " + p1Instrument + " " + p2Delay + " " + p3Duration + " " + concatenatedPFields;
-
-        Debug.Log(scoreEvent);
         return scoreEvent;
     }
 }
