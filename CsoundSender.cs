@@ -1,13 +1,13 @@
-using System.Collections.Generic;
 using UnityEngine;
-using UnityEditor;
+using System.Collections;
+using System.Collections.Generic;
 
 /// <summary>
 /// Provides methods to send data in the CsoundChannelDataSO and CsoundScoreEventSO assets through a CsoundUnity component.
 /// </summary>
 public class CsoundSender : MonoBehaviour
 {
-    [Tooltip("Reference to the CsoundUnity component to send information to. Will automatically get the component attached to the same object if left empty.")]
+    [Tooltip("Reference to the CsoundUnity component to send values to. Will automatically get the component attached to the same object if left empty.")]
     public CsoundUnity csoundUnity;
     [Space]
     public CsoundSenderPresets InstrumentPresets;
@@ -33,6 +33,19 @@ public class CsoundSender : MonoBehaviour
 
     void Start()
     {
+        StartCoroutine(Initialization());
+    }
+
+    private IEnumerator Initialization()
+    {
+        while (!csoundUnity.IsInitialized)
+        {
+            Debug.Log("CSOUND NOT INITIALIZED");
+            yield return null;
+        }
+
+        Debug.Log("CSOUND INITIALIZED");
+
         //Calls SetPreset if setPresetOnStart is true.
         if (InstrumentPresets.setPresetOnStart)
             SetPreset(InstrumentPresets.presetIndexOnStart);
@@ -193,6 +206,18 @@ public class CsoundSender : MonoBehaviour
     /// </summary>
     /// <param name="scoreEvent"></param>
     public void SendScoreEvent(CsoundScoreEventSO scoreEvent)
+    {
+        csoundUnity.SendScoreEvent(scoreEvent.ConcatenateScoreEventString());
+
+        if(ScoreEvents.debugScoreEvents)
+            Debug.Log("CSOUND " + gameObject.name + " score event: " + scoreEvent + " " + scoreEvent.ConcatenateScoreEventString());
+    }
+
+    /// <summary>
+    /// Adds a ScoreEvent asset to the list and sends it as a score event.
+    /// </summary>
+    /// <param name="scoreEvent"></param>
+    public void SendScoreEventAndAddToList(CsoundScoreEventSO scoreEvent)
     {
         //Adds new ScoreEvent asset to the list as the last item.
         ScoreEvents.scoreEventsList.Add(scoreEvent);
